@@ -1,0 +1,1 @@
+export function Dashboard() { return <section className="tab-placeholder dashboard-placeholder"><p className="eyebrow">ASSETNEXSUS OVERVIEW</p><h1>Dashboard</h1><p>Dashboard components will be added next.</p></section> }

@@ -1,4 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useAuth } from '../context/AuthContext'
+import { dataApi } from '../services/dataApi'
+
+type Asset = { tag: string; name: string; serial: string; category: string; location: string; status: string; condition: string; holder: string }
 
 type MaintenanceStatus = 'Pending' | 'Approved' | 'Rejected' | 'Technician Assigned' | 'In Progress' | 'Resolved'
 
@@ -48,14 +52,32 @@ function historyLabel(status: MaintenanceStatus) {
 }
 
 export function MaintenanceManagement() {
-  const [items, setItems] = useState(initialItems)
+  const { token, user } = useAuth()
+  const [items, setItems] = useState<MaintenanceItem[]>([])
+  const [assets, setAssets] = useState<Asset[]>([])
   const [activeFilter, setActiveFilter] = useState<'All' | MaintenanceStatus | 'Rejected'>('All')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [assetTag, setAssetTag] = useState('AF-0006')
+  const [assetTag, setAssetTag] = useState('')
   const [issue, setIssue] = useState('Describe the problem in detail...')
   const [priority, setPriority] = useState<MaintenanceItem['priority']>('Low')
   const [photoName, setPhotoName] = useState('')
   const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    if (!token) return
+    Promise.all([
+      dataApi.list<Asset>('assets', token),
+      dataApi.list<MaintenanceItem>('maintenance', token)
+    ]).then(([assetData, maintData]) => {
+      if (assetData.assets.length) {
+        setAssets(assetData.assets)
+        setAssetTag(assetData.assets[0].tag)
+      }
+      setItems(maintData.maintenance?.length ? maintData.maintenance : initialItems)
+    }).catch(() => {
+      setItems(initialItems)
+    })
+  }, [token])
 
   const total = items.length
   const pendingCount = items.filter((item) => item.status === 'Pending').length
@@ -69,40 +91,92 @@ export function MaintenanceManagement() {
 
   const approvedOnes = items.filter((item) => item.status === 'Approved' || item.status === 'Technician Assigned' || item.status === 'In Progress')
 
-  const handleRaiseRequest = () => {
+  const handleRaiseRequest = async () => {
+    if (!token) return
+    const selectedAsset = assets.find((a) => a.tag === assetTag)
+    const assetName = selectedAsset ? selectedAsset.name : 'Unknown Asset'
+
     const next: MaintenanceItem = {
       id: crypto.randomUUID(),
       assetTag,
-      assetName: assetTag === 'AF-0006' ? 'Cisco Catalyst 9300 Switch' : 'New Asset',
-      raisedBy: 'Arjun Mehta',
+      assetName,
+      raisedBy: user?.name || 'Arjun Mehta',
       priority,
       status: 'Pending',
       assetStatus: 'Available',
       issue,
-      raisedOn: '2026-07-12',
+      raisedOn: new Date().toISOString().split('T')[0],
       history: ['Pending review'],
     }
-    setItems((current) => [next, ...current])
-    setNotice(`Request raised for ${next.assetTag}${photoName ? ` with ${photoName}` : ''}.`)
-    setDialogOpen(false)
-    setPhotoName('')
+
+    try {
+      await dataApi.save('maintenance', next, token)
+      setItems((current) => [next, ...current])
+      setNotice(`Request raised for ${next.assetTag}${photoName ? ` with ${photoName}` : ''}.`)
+      setDialogOpen(false)
+      setPhotoName('')
+    } catch {
+      setNotice('Could not save maintenance request to the database.')
+    }
   }
 
-  const advanceStatus = (id: string) => {
-    setItems((current) => current.map((item) => {
-      if (item.id !== id) return item
-      if (item.status === 'Pending') return { ...item, status: 'Approved', assetStatus: 'Under Maintenance', history: [...item.history, 'Approved by Asset Manager', 'Asset status set to Under Maintenance'] }
-      if (item.status === 'Approved') return { ...item, status: 'Technician Assigned', assignedTo: item.assignedTo ?? 'Technician Team', history: [...item.history, 'Technician assigned'] }
-      if (item.status === 'Technician Assigned') return { ...item, status: 'In Progress', history: [...item.history, 'Work started'] }
-      if (item.status === 'In Progress') return { ...item, status: 'Resolved', assetStatus: 'Available', history: [...item.history, 'Resolved', 'Asset status set to Available'] }
-      return item
-    }))
-    setNotice('Maintenance workflow advanced and asset status updated accordingly.')
+  const advanceStatus = async (id: string) => {
+    if (!token) return
+    const item = items.find((item) => item.id === id)
+    if (!item) return
+    let updated: MaintenanceItem | null = null
+
+    if (item.status === 'Pending') {
+      updated = { ...item, status: 'Approved', assetStatus: 'Under Maintenance', history: [...item.history, 'Approved by Asset Manager', 'Asset status set to Under Maintenance'] }
+      const asset = assets.find((a) => a.tag === item.assetTag)
+      if (asset) {
+        try {
+          await dataApi.save('assets', { ...asset, status: 'Under Maintenance' }, token)
+          setAssets((current) => current.map((a) => a.tag === item.assetTag ? { ...a, status: 'Under Maintenance' } : a))
+        } catch (err) {
+          console.error('Could not update asset status in database', err)
+        }
+      }
+    } else if (item.status === 'Approved') {
+      updated = { ...item, status: 'Technician Assigned', assignedTo: item.assignedTo ?? 'Technician Team', history: [...item.history, 'Technician assigned'] }
+    } else if (item.status === 'Technician Assigned') {
+      updated = { ...item, status: 'In Progress', history: [...item.history, 'Work started'] }
+    } else if (item.status === 'In Progress') {
+      updated = { ...item, status: 'Resolved', assetStatus: 'Available', history: [...item.history, 'Resolved', 'Asset status set to Available'] }
+      const asset = assets.find((a) => a.tag === item.assetTag)
+      if (asset) {
+        try {
+          await dataApi.save('assets', { ...asset, status: 'Available' }, token)
+          setAssets((current) => current.map((a) => a.tag === item.assetTag ? { ...a, status: 'Available' } : a))
+        } catch (err) {
+          console.error('Could not update asset status in database', err)
+        }
+      }
+    }
+
+    if (updated) {
+      try {
+        await dataApi.save('maintenance', updated, token)
+        setItems((current) => current.map((i) => i.id === id ? updated! : i))
+        setNotice('Maintenance workflow advanced and asset status updated accordingly.')
+      } catch {
+        setNotice('Could not update maintenance request status in database.')
+      }
+    }
   }
 
-  const markRejected = (id: string) => {
-      setItems((current) => current.map((item) => item.id === id ? { ...item, status: 'Rejected', assetStatus: 'Available', history: [...item.history, 'Rejected by Asset Manager', 'Asset status remains Available'] } : item))
-    setNotice('Request rejected by Asset Manager.')
+  const markRejected = async (id: string) => {
+    if (!token) return
+    const item = items.find((i) => i.id === id)
+    if (!item) return
+    const updated: MaintenanceItem = { ...item, status: 'Rejected', assetStatus: 'Available', history: [...item.history, 'Rejected by Asset Manager', 'Asset status remains Available'] }
+    try {
+      await dataApi.save('maintenance', updated, token)
+      setItems((current) => current.map((i) => i.id === id ? updated : i))
+      setNotice('Request rejected by Asset Manager.')
+    } catch {
+      setNotice('Could not reject request in the database.')
+    }
   }
 
   return (
@@ -196,8 +270,15 @@ export function MaintenanceManagement() {
             </div>
             <div className="maintenance-modal-body">
               <label>
-                Asset Tag
-                <input value={assetTag} onChange={(event) => setAssetTag(event.target.value)} placeholder="e.g. AF-0006" />
+                Select Asset
+                <select value={assetTag} onChange={(event) => setAssetTag(event.target.value)} required>
+                  {assets.length === 0 && <option value="">No assets registered</option>}
+                  {assets.map((asset) => (
+                    <option key={asset.tag} value={asset.tag}>
+                      [{asset.tag}] {asset.name}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 Issue Description

@@ -13,6 +13,6 @@ import { OrganizationSetup } from '../features/OrganizationSetup'
 
 export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
-  const content = activeTab === 'dashboard' ? <Dashboard /> : activeTab === 'qr-management' ? <QrManagement /> : activeTab === 'asset-directory' ? <AssetDirectory /> : activeTab === 'resource-booking' ? <ResourceBooking /> : activeTab === 'allocation-transfer' ? <AllocationTransfer /> : activeTab === 'maintenance' ? <MaintenanceManagement /> : activeTab === 'audit-cycles' ? <AuditCycles /> : activeTab === 'organization-setup' ? <OrganizationSetup /> : <TabPlaceholder tab={activeTab} />
+  const content = activeTab === 'dashboard' ? <Dashboard onNavigate={setActiveTab} /> : activeTab === 'qr-management' ? <QrManagement /> : activeTab === 'asset-directory' ? <AssetDirectory /> : activeTab === 'resource-booking' ? <ResourceBooking /> : activeTab === 'allocation-transfer' ? <AllocationTransfer /> : activeTab === 'maintenance' ? <MaintenanceManagement /> : activeTab === 'audit-cycles' ? <AuditCycles /> : activeTab === 'organization-setup' ? <OrganizationSetup /> : <TabPlaceholder tab={activeTab} />
   return <div className="app-shell"><Sidebar activeTab={activeTab} onSelect={setActiveTab} onSignOut={onSignOut}/><main className="app-content">{content}</main></div>
 }

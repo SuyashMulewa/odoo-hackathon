@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# SQLite temporary database files
+server/data/*.db-shm
+server/data/*.db-wal

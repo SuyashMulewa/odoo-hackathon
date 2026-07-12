@@ -227,7 +227,7 @@ export function MaintenanceManagement() {
             <div className="maintenance-meta">
               <div><span>Raised by</span><strong>{item.raisedBy}</strong></div>
               <div><span>Priority</span><strong>{item.priority}</strong></div>
-                <div><span>Asset status</span><strong>{item.assetStatus}</strong></div>
+              <div><span>Asset status</span><strong>{item.assetStatus}</strong></div>
             </div>
             <div className={`maintenance-status ${statusTone[item.status]}`}>{item.status}</div>
             <div className="maintenance-actions">

@@ -5,6 +5,7 @@ import './AllocationCompact.css'
 
 type AllocationStatus = 'Active' | 'Overdue' | 'Returned'
 type TransferStatus = 'Requested' | 'Approved' | 'Re-allocated'
+type Asset = { tag: string; name: string; status: string }
 
 type Allocation = {
   id: string
@@ -60,7 +61,8 @@ function transferTone(status: TransferStatus | 'Denied') {
 }
 
 export function AllocationTransfer() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
+  const [assets, setAssets] = useState<Asset[]>([])
   const [allocations, setAllocations] = useState(initialAllocations)
   const [transfers, setTransfers] = useState(initialTransfers)
   const [activeTab, setActiveTab] = useState<'active' | 'history' | 'new'>('active')
@@ -77,8 +79,9 @@ export function AllocationTransfer() {
 
   useEffect(() => {
     if (!token) return
-    Promise.all([dataApi.list<Allocation>('allocations', token), dataApi.list<Transfer>('transfers', token)])
-      .then(([allocationData, transferData]) => {
+    Promise.all([dataApi.list<Asset>('assets', token), dataApi.list<Allocation>('allocations', token), dataApi.list<Transfer>('transfers', token)])
+      .then(([assetData, allocationData, transferData]) => {
+        setAssets(assetData.assets)
         setAllocations(allocationData.allocations)
         setTransfers(transferData.transfers)
       })
@@ -90,6 +93,7 @@ export function AllocationTransfer() {
   const overdueAllocations = useMemo(() => allocations.filter((item) => item.status === 'Overdue' || isOverdue(item.expectedReturnDate)), [allocations])
   const activeCount = activeAllocations.filter((item) => item.status === 'Active').length
   const returnedCount = allocations.filter((item) => item.status === 'Returned').length
+  const returnedAllocations = allocations.filter((item) => item.status === 'Returned')
   const requestedTransfers = transfers.filter((item) => item.status === 'Requested').length
 
   const alertFeed = useMemo(() => overdueAllocations.map((item) => ({
@@ -98,6 +102,8 @@ export function AllocationTransfer() {
   })), [overdueAllocations])
 
   const handleAllocate = async () => {
+    const asset = assets.find((item) => item.tag.toLowerCase() === selectedAssetTag.trim().toLowerCase())
+    if (!asset) return setNotice(`Asset number ${selectedAssetTag.trim() || 'entered'} does not exist. Select an asset from the list.`)
     const conflict = allocations.find((item) => item.assetTag === selectedAssetTag && item.status !== 'Returned')
     if (conflict) {
       setNotice(`${selectedAllocation.assetName} is currently held by ${conflict.holder}. Use Transfer Request instead.`)
@@ -107,8 +113,8 @@ export function AllocationTransfer() {
 
     const nextAllocation: Allocation = {
       id: crypto.randomUUID(),
-      assetTag: selectedAssetTag,
-      assetName: selectedAllocation.assetName,
+      assetTag: asset.tag,
+      assetName: asset.name,
       holder: allocTo,
       holderType: allocType,
       department: allocDepartment,
@@ -160,6 +166,7 @@ export function AllocationTransfer() {
   }
 
   const handleApproveTransfer = async (transferId: string) => {
+    if (!user || !['asset_manager', 'department_head', 'admin'].includes(user.role)) return setNotice('Only an Asset Manager or Department Head can approve a transfer.')
     const currentTransfer = transfers.find((transfer) => transfer.id === transferId)
     if (!currentTransfer || !token) return
     const approvedBy = 'Asset Manager'
@@ -263,6 +270,20 @@ export function AllocationTransfer() {
 
       {activeTab === 'history' && (
         <div className="allocation-history">
+          {returnedAllocations.map((allocation) => (
+            <article key={allocation.id} className="history-card slate">
+              <div>
+                <small>{allocation.assetTag}</small>
+                <h3>{allocation.assetName}</h3>
+                <p>Returned by {allocation.holder}</p>
+              </div>
+              <div className="allocation-status slate">Returned</div>
+              <ul>
+                <li>Allocated on {allocation.allocatedOn}</li>
+                <li>Check-in: {allocation.notes || 'Condition not recorded'}</li>
+              </ul>
+            </article>
+          ))}
           {transfers.map((transfer) => (
             <article key={transfer.id} className={`history-card ${transferTone(transfer.status)}`}>
               <div>
@@ -302,7 +323,10 @@ export function AllocationTransfer() {
             <h2>New Allocation</h2>
             <label>
               Asset Tag / Search
-              <input value={selectedAssetTag} onChange={(event) => setSelectedAssetTag(event.target.value)} placeholder="e.g. AF-0114 or Dell XPS" />
+              <input list="allocatable-assets" value={selectedAssetTag} onChange={(event) => setSelectedAssetTag(event.target.value)} placeholder="Select or enter an asset number" />
+              <datalist id="allocatable-assets">
+                {assets.map((asset) => <option key={asset.tag} value={asset.tag}>{asset.name} — {asset.status}</option>)}
+              </datalist>
             </label>
             <label>
               Assign To (Employee/Department)
@@ -331,7 +355,7 @@ export function AllocationTransfer() {
           <section className="allocation-panel">
             <h2>Conflict Handling</h2>
             <p>If an asset is already allocated, the system blocks re-allocation and shows the current holder, offering a Transfer Request instead.</p>
-            {selectedAllocation.status !== 'Returned' && (
+            {allocations.some((item) => item.assetTag === selectedAssetTag && item.status !== 'Returned') && selectedAllocation.status !== 'Returned' && (
               <div className="conflict-box">
                 <strong>{selectedAllocation.assetTag}</strong>
                 <span>Currently held by {selectedAllocation.holder}</span>
